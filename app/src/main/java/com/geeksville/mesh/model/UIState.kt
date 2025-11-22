@@ -593,13 +593,13 @@ class UIViewModel @Inject constructor(
                                     .replace("\"", "\"\"")
                                 (proto.decoded.portnumValue == Portnums.PortNum.POSITION_APP_VALUE)
                                  -> MeshProtos.Position.parseFrom(proto.decoded.payload).toString()
-                                    .replace("\"", "\"\"")
+                                    .replace("\"", "\"\"").replace(',', ';')
                                 (proto.decoded.portnumValue == Portnums.PortNum.TELEMETRY_APP_VALUE)
                                  -> TelemetryProtos.Telemetry.parseFrom(proto.decoded.payload).toString()
-                                    .replace("\"", "\"\"")
+                                    .replace("\"", "\"\"").replace(',', ';')
                                 (proto.decoded.portnumValue == Portnums.PortNum.NODEINFO_APP_VALUE)
                                  -> MeshProtos.User.parseFrom(proto.decoded.payload).toString()
-                                    .replace("\"", "\"\"")
+                                    .replace("\"", "\"\"").replace(',', ';')
                                 else -> ""
                             }
 
