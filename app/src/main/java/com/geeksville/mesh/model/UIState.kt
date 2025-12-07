@@ -495,7 +495,6 @@ class UIViewModel @Inject constructor(
                             nodePositions[nodeInfo.num] = nodeInfo.position
                         }
                     }
-
                     packet.meshPacket?.let { proto ->
                         // If the packet contains position data then use it to update, if valid
                         packet.position?.let { position ->
@@ -504,6 +503,7 @@ class UIViewModel @Inject constructor(
                             }
 
                         }
+
                         // Filter out of our results any packet that doesn't report SNR.  This
                         // is primarily ADMIN_APP.
                         if (proto.rxSnr != 0.0f) {
@@ -520,7 +520,7 @@ class UIViewModel @Inject constructor(
                             val senderLatI = senderPosition?.latitudeI ?: ""
                             val senderLongI = senderPosition?.longitudeI ?: ""
                             val senderAlt = senderPos?.altitude ?: ""
-                            val senderTime = senderPos?.time ?: 0
+                            val senderTime = packetRepository.getDataPacketById(proto.id)?.sendtime
                             val senderPDOP = senderPosition?.pdop ?: ""
                             val senderGroudSpeed = senderPosition?.groundSpeed ?: ""
                             val senderGroundTrack = senderPosition?.groundTrack ?: ""
@@ -583,8 +583,8 @@ class UIViewModel @Inject constructor(
 
                             val portnum = proto.decoded.portnum
 
-                            val decoded_payload = proto.decoded.payload
-
+                            val decoded_payload = proto.decoded.payload.toString().replace("\"", "\"\"")
+                            proto.rxTime
                             val payload = when {
                                 proto.decoded.portnumValue in setOf(
                                     Portnums.PortNum.TEXT_MESSAGE_APP_VALUE,
@@ -593,13 +593,13 @@ class UIViewModel @Inject constructor(
                                     .replace("\"", "\"\"")
                                 (proto.decoded.portnumValue == Portnums.PortNum.POSITION_APP_VALUE)
                                  -> MeshProtos.Position.parseFrom(proto.decoded.payload).toString()
-                                    .replace("\"", "\"\"").replace(',', ';')
+                                    .replace("\"", "\"\"")
                                 (proto.decoded.portnumValue == Portnums.PortNum.TELEMETRY_APP_VALUE)
                                  -> TelemetryProtos.Telemetry.parseFrom(proto.decoded.payload).toString()
-                                    .replace("\"", "\"\"").replace(',', ';')
+                                    .replace("\"", "\"\"")
                                 (proto.decoded.portnumValue == Portnums.PortNum.NODEINFO_APP_VALUE)
                                  -> MeshProtos.User.parseFrom(proto.decoded.payload).toString()
-                                    .replace("\"", "\"\"").replace(',', ';')
+                                    .replace("\"", "\"\"")
                                 else -> ""
                             }
 

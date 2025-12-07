@@ -878,6 +878,7 @@ class MeshService : Service(), Logging {
                 val packet = queuedPackets.poll() ?: break
                 try {
                     // send packet to the radio and wait for response
+                    getDataPacketById(packet.id)?.sendtime = System.currentTimeMillis()
                     val response = sendPacket(packet)
                     debug("queueJob packet id=${packet.id.toUInt()} waiting")
                     val success = response.get(2, TimeUnit.MINUTES)
