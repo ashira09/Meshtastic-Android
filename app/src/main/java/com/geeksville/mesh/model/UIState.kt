@@ -52,6 +52,7 @@ import java.util.Locale
 import javax.inject.Inject
 import kotlin.math.roundToInt
 import com.geeksville.mesh.Position
+import kotlinx.coroutines.flow.toList
 
 /// Given a human name, strip out the first letter of the first three words and return that as the initials for
 /// that user. If the original name is only one word, strip vowels from the original name and if the result is
@@ -418,7 +419,6 @@ class UIViewModel @Inject constructor(
         viewModelScope.launch(Dispatchers.Main) {
             // Extract distances to this device from position messages and put (node,SNR,distance) in
             // the file_uri
-            val myNodeNum = myNodeNum ?: return@launch
 
             // Capture the current node value while we're still on main thread
             val nodes = nodeDB.nodes.value
@@ -434,59 +434,12 @@ class UIViewModel @Inject constructor(
                 val nodesById = nodes.values.associateBy { it.num }.toMutableMap()
                 val nodePositions = mutableMapOf<Int, MeshProtos.Position?>()
 
-                writer.appendLine("\"date\"," +
-                        "\"time\"," +
-                        "\"from\"," +
-                        "\"sender name\"," +
-                        "\"sender lat\"," +
-                        "\"sender long\"," +
-                        "\"sender latI\"," +
-                        "\"sender longI\"," +
-                        "\"sender alt\"," +
-                        "\"sender time\"," +
-                        "\"sender PDOP\"," +
-                        "\"sender ground speed\"," +
-                        "\"sender ground track\"," +
-                        "\"sender sats in view\"," +
-                        "\"sender battery level\"," +
-                        "\"sender voltage\"," +
-                        "\"sender channel utilization\"," +
-                        "\"sender air util tx\"," +
-                        "\"recipient lat\"," +
-                        "\"recipient long\"," +
-                        "\"recipient latI\"," +
-                        "\"recipient longI\"," +
-                        "\"recipient alt\"," +
-                        "\"recipient time\"," +
-                        "\"recipient RSSI\"," +
-                        "\"recipient SNR\"," +
-                        "\"distance\"," +
-                        "\"hop limit\"," +
-                        "\"portnum\"," +
-                        "\"decoded payload\"," +
-                        "\"payload\"," +
-                        "\"rx message serialized size\"," +
-                        "\"rx message via mqtt\"," +
-                        "\"rx message want ack\"," +
-                        "\"LoRa region\"," +
-                        "\"LoRa region value\"," +
-                        "\"LoRa tx enabled\"," +
-                        "\"LoRa tx power\"," +
-                        "\"LoRa bandwidth\"," +
-                        "\"LoRa coding rate\"," +
-                        "\"LoRa frequency offset\"," +
-                        "\"LoRa hop limit\"," +
-                        "\"LoRa ignore mqtt\"," +
-                        "\"LoRa use preset\"," +
-                        "\"LoRa modem preset name\"," +
-                        "\"LoRa modem preset value\"," +
-                        "\"LoRa ignore incoming count\"," +
-                        "\"LoRa ignore incoming list\"," +
-                        "\"LoRa override duty cycle\"," +
-                        "\"LoRa override frequency\"," +
-                        "\"LoRa radio frequency\"," +
-                        "\"LoRa spread factor\"," +
-                        "\"LoRa sx126XRx boosted gain\"")
+                writer.appendLine(
+                        "\"t_date\"," + "\"t_time\"," + "\"t_time_ms\"," + "\"t_id\"," + "\"t_name\"," + "\"t_lat\"," + "\"t_long\"," + "\"t_alt\"," + "\"t_PDOP\"," + "\"t_ground_speed\"," + "\"t_ground_track\"," + "\"t_sats_in_view\"," + "\"t_battery_level\"," + "\"t_voltage\"," + "\"t_channel_utilization\"," + "\"t_air_util_tx\"," +
+                        "\"r_date\"," + "\"r_time\"," + "\"r_time_ms\"," + "\"r_id\"," + "\"r_name\"," + "\"r_lat\"," + "\"r_long\"," + "\"r_alt\"," + "\"r_RSSI\"," + "\"r_SNR\"," +
+                        "\"actual_airtime\"," + "\"theoretical_airtime\"," + "\"distance\"," + "\"portnum\"," + "\"decoded_payload\"," + "\"payload\"," + "\"message_serialized_size\"," + "\"message_via_mqtt\"," + "\"message_want_ack\"," +
+                        "\"lora_region\"," + "\"lora_region_value\"," + "\"lora_tx_enabled\"," + "\"lora_tx_power\"," + "\"lora_bandwidth\"," + "\"lora_coding_rate\"," + "\"lora_frequency_offset\"," + "\"lora_hop_limit\"," + "\"lora_ignore_mqtt\"," + "\"lora_use_preset\"," + "\"lora_modem_preset_name\"," + "\"lora_modem_preset_value\"," + "\"lora_ignore_incoming_count\"," + "\"lora_ignore_incoming_list\"," + "\"lora_override_duty_cycle\"," + "\"lora_override_frequency\"," + "\"lora_radio_frequency\"," + "\"lora_spread factor\"," + "\"lora_sx126xrx_boosted_gain\"")
+
                 val dateFormat = SimpleDateFormat("\"yyyy-MM-dd\",\"HH:mm:ss\"", Locale.getDefault())
                 meshLogRepository.getAllLogsInReceiveOrder(Int.MAX_VALUE).first().forEach { packet ->
                     // If we get a NodeInfo packet, use it to update our position data (if valid)
@@ -499,63 +452,89 @@ class UIViewModel @Inject constructor(
                         // If the packet contains position data then use it to update, if valid
                         packet.position?.let { position ->
                             positionToPos.invoke(position)?.let {
-                                nodePositions[proto.from.takeIf { it != 0 } ?: myNodeNum] = position
+                                nodePositions[(proto.from.takeIf { it != 0 } ?: myNodeNum) as Int] = position
                             }
 
                         }
 
                         // Filter out of our results any packet that doesn't report SNR.  This
                         // is primarily ADMIN_APP.
-                        if (proto.rxSnr != 0.0f) {
-                            val rxDateTime = dateFormat.format(packet.received_date)
-                            val rxFrom = proto.from.toUInt()
-                            val senderNode = nodesById[proto.from]
-                            val senderName = nodesById[proto.from]?.user?.longName ?: ""
+                        if (proto.decoded.portnumValue in setOf(Portnums.PortNum.TEXT_MESSAGE_APP_VALUE,
+                                                                Portnums.PortNum.RANGE_TEST_APP_VALUE,
+                                                                Portnums.PortNum.POSITION_APP_VALUE,
+                                                                Portnums.PortNum.TELEMETRY_APP_VALUE,
+                                                                Portnums.PortNum.NODEINFO_APP_VALUE)) {
+                            val tDateTime = dateFormat.format(proto.txTime.toLong() * 1000)
+                            val tTimeMs = proto.txTimeMs
+                            val tId = proto.from.toUInt()
+                            val tName = nodesById[proto.from]?.user?.longName ?: ""
+                            val tPosition = nodePositions[proto.from]
+                            val tPos = positionToPos.invoke(tPosition)
+                            val tNode = nodesById[proto.from]
+                            val tLat = tPos?.latitude ?: ""
+                            val tLong = tPos?.longitude ?: ""
+                            val tAlt = tPos?.altitude ?: ""
+                            val tPDOP = tPosition?.pdop ?: ""
+                            val tGroudSpeed = tPosition?.groundSpeed ?: ""
+                            val tGroundTrack = tPosition?.groundTrack ?: ""
+                            val tSatsInView = tPosition?.satsInView ?: ""
+                            val tBatteryLevel = tNode?.deviceMetrics?.batteryLevel ?: ""
+                            val tVoltage = tNode?.deviceMetrics?.voltage ?: ""
+                            val tChannelUtilization = tNode?.deviceMetrics?.channelUtilization ?: ""
+                            val tAirUtilTx = tNode?.deviceMetrics?.airUtilTx ?: ""
 
-                            // sender lat & long
-                            val senderPosition = nodePositions[proto.from]
-                            val senderPos = positionToPos.invoke(senderPosition)
-                            val senderLat = senderPos?.latitude ?: ""
-                            val senderLong = senderPos?.longitude ?: ""
-                            val senderLatI = senderPosition?.latitudeI ?: ""
-                            val senderLongI = senderPosition?.longitudeI ?: ""
-                            val senderAlt = senderPos?.altitude ?: ""
-                            val senderTime = packetRepository.getDataPacketById(proto.id)?.sendtime
-                            val senderPDOP = senderPosition?.pdop ?: ""
-                            val senderGroudSpeed = senderPosition?.groundSpeed ?: ""
-                            val senderGroundTrack = senderPosition?.groundTrack ?: ""
-                            val senderSatsInView = senderPosition?.satsInView ?: ""
+                            val rDateTime = dateFormat.format(packet.received_date)
+                            val rTimeMs = proto.rxTimeMs
+                            val rId = myNodeNum
+                            val rName = nodesById[myNodeNum]?.user?.longName ?: ""
+                            val rPosition = nodePositions[myNodeNum]
+                            val rPos = positionToPos.invoke(nodePositions[myNodeNum])
+                            val rLat = rPos?.latitude ?: ""
+                            val rLong = rPos?.longitude ?: ""
+                            val rAlt = rPos?.altitude ?: ""
+                            val rRSSI = "%d".format(proto.rxRssi)
+                            val rSNR = "%f".format(proto.rxSnr)
 
-                            // sender device metrics
-                            val senderBatteryLevel = senderNode?.deviceMetrics?.batteryLevel ?: ""
-                            val senderVoltage = senderNode?.deviceMetrics?.voltage ?: ""
-                            val senderChannelUtilization = senderNode?.deviceMetrics?.channelUtilization ?: ""
-                            val senderAirUtilTx = senderNode?.deviceMetrics?.airUtilTx ?: ""
+                            val actual_airtime = proto.actualAirtime
+                            val theoretical_airtime = proto.theoreticalAirtime
 
-                            // recipient lat, long, and elevation
-                            val recipientPosition = nodePositions[myNodeNum]
-                            val recipientPos = positionToPos.invoke(recipientPosition)
-                            val recipientLat = recipientPos?.latitude ?: ""
-                            val recipientsLong = recipientPos?.longitude ?: ""
-                            val recipientLatI = recipientPosition?.latitudeI ?: ""
-                            val recipientLongI = recipientPosition?.longitudeI ?: ""
-                            val recipientAlt = recipientPos?.altitude ?: ""
-                            val recipientTime = recipientPos?.time ?: 0
-                            val recipientRSSI = "%d".format(proto.rxRssi)
-                            val recipientSNR = "%f".format(proto.rxSnr)
-
-                            // message params
+                            val distance = if (tPos == null || rPos == null) {
+                                ""
+                            } else {
+                                positionToMeter(
+                                    rPosition!!, // Use rxPosition but only if rxPos was valid
+                                    tPosition!! // Use senderPosition but only if senderPos was valid
+                                ).roundToInt().toString()
+                            }
+                            val portnum = proto.decoded.portnum
+                            val decoded_payload = proto.decoded.payload.toString().replace("\"", "\"\"")
+                            val payload = when {
+                                proto.decoded.portnumValue in setOf(
+                                    Portnums.PortNum.TEXT_MESSAGE_APP_VALUE,
+                                    Portnums.PortNum.RANGE_TEST_APP_VALUE,
+                                ) -> proto.decoded.payload.toStringUtf8()
+                                    .replace("\"", "\"\"")
+                                (proto.decoded.portnumValue == Portnums.PortNum.POSITION_APP_VALUE)
+                                    -> MeshProtos.Position.parseFrom(proto.decoded.payload).toString()
+                                    .replace("\"", "\"\"")
+                                (proto.decoded.portnumValue == Portnums.PortNum.TELEMETRY_APP_VALUE)
+                                    -> TelemetryProtos.Telemetry.parseFrom(proto.decoded.payload).toString()
+                                    .replace("\"", "\"\"")
+                                (proto.decoded.portnumValue == Portnums.PortNum.NODEINFO_APP_VALUE)
+                                    -> MeshProtos.User.parseFrom(proto.decoded.payload).toString()
+                                    .replace("\"", "\"\"")
+                                else -> ""
+                            }
                             val messageSerializedSize = proto.serializedSize
                             val messageViaMqtt = proto.viaMqtt
                             val messageWantAck = proto.wantAck
 
-                            // LoRa params
                             val LoRaRegion = _channels.value.loraConfig.region
                             val LoRaRegionValue = _channels.value.loraConfig.regionValue
                             val LoRaTXEnabled = _channels.value.loraConfig.txEnabled
                             val LoRaTXPower = _channels.value.loraConfig.txPower
-                            val LoRaBandwith = _channels.value.loraConfig.bandwidth() // определён пресетом
-                            val LoRaCodingRate = _channels.value.loraConfig.codingRate() // определён пресетом
+                            val LoRaBandwith = _channels.value.loraConfig.bandwidth()
+                            val LoRaCodingRate = _channels.value.loraConfig.codingRate()
                             val LoRaFrequencyOffset = _channels.value.loraConfig.frequencyOffset
                             val LoRaHopLimit = _channels.value.loraConfig.hopLimit
                             val LoRaIgnoreMQTT = _channels.value.loraConfig.ignoreMqtt
@@ -567,95 +546,14 @@ class UIViewModel @Inject constructor(
                             val LoRaOverrideDutyCycle = _channels.value.loraConfig.overrideDutyCycle
                             val LoRaOverrideFrequency = _channels.value.loraConfig.overrideFrequency
                             val LoRaRadioFrequency = _channels.value.loraConfig.radioFreq(proto.channel)
-                            val LoRaSpreadFactor = _channels.value.loraConfig.spreadFactor() // определён пресетом
+                            val LoRaSpreadFactor = _channels.value.loraConfig.spreadFactor()
                             val LoRaSX126XRxBosstedGain = _channels.value.loraConfig.sx126XRxBoostedGain
-
-                            val dist = if (senderPos == null || recipientPos == null) {
-                                ""
-                            } else {
-                                positionToMeter(
-                                    recipientPosition!!, // Use rxPosition but only if rxPos was valid
-                                    senderPosition!! // Use senderPosition but only if senderPos was valid
-                                ).roundToInt().toString()
-                            }
-
-                            val hopLimit = proto.hopLimit
-
-                            val portnum = proto.decoded.portnum
-
-                            val decoded_payload = proto.decoded.payload.toString().replace("\"", "\"\"")
-                            proto.rxTime
-                            val payload = when {
-                                proto.decoded.portnumValue in setOf(
-                                    Portnums.PortNum.TEXT_MESSAGE_APP_VALUE,
-                                    Portnums.PortNum.RANGE_TEST_APP_VALUE,
-                                ) -> proto.decoded.payload.toStringUtf8()
-                                    .replace("\"", "\"\"")
-                                (proto.decoded.portnumValue == Portnums.PortNum.POSITION_APP_VALUE)
-                                 -> MeshProtos.Position.parseFrom(proto.decoded.payload).toString()
-                                    .replace("\"", "\"\"")
-                                (proto.decoded.portnumValue == Portnums.PortNum.TELEMETRY_APP_VALUE)
-                                 -> TelemetryProtos.Telemetry.parseFrom(proto.decoded.payload).toString()
-                                    .replace("\"", "\"\"")
-                                (proto.decoded.portnumValue == Portnums.PortNum.NODEINFO_APP_VALUE)
-                                 -> MeshProtos.User.parseFrom(proto.decoded.payload).toString()
-                                    .replace("\"", "\"\"")
-                                else -> ""
-                            }
-
-                            //  datetime,from,sender name,sender lat,sender long,rx lat,rx long,rx elevation,rx snr,distance,hop limit,payload
-                            writer.appendLine("$rxDateTime," +
-                                    "\"$rxFrom\"," +
-                                    "\"$senderName\"," +
-                                    "\"$senderLat\"," +
-                                    "\"$senderLong\"," +
-                                    "\"$senderLatI\"," +
-                                    "\"$senderLongI\"," +
-                                    "\"$senderAlt\"," +
-                                    "\"$senderTime\"," +
-                                    "\"$senderPDOP\"," +
-                                    "\"$senderGroudSpeed\"," +
-                                    "\"$senderGroundTrack\"," +
-                                    "\"$senderSatsInView\"," +
-                                    "\"$senderBatteryLevel\"," +
-                                    "\"$senderVoltage\"," +
-                                    "\"$senderChannelUtilization\"," +
-                                    "\"$senderAirUtilTx\"," +
-                                    "\"$recipientLat\"," +
-                                    "\"$recipientsLong\"," +
-                                    "\"$recipientLatI\"," +
-                                    "\"$recipientLongI\"," +
-                                    "\"$recipientAlt\"," +
-                                    "\"$recipientTime\"," +
-                                    "\"$recipientRSSI\"," +
-                                    "\"$recipientSNR\"," +
-                                    "\"$dist\"," +
-                                    "\"$hopLimit\"," +
-                                    "\"$portnum\"," +
-                                    "\"$decoded_payload\"," +
-                                    "\"$payload\"," +
-                                    "\"$messageSerializedSize\"," +
-                                    "\"$messageViaMqtt\"," +
-                                    "\"$messageWantAck\"," +
-                                    "\"$LoRaRegion\"," +
-                                    "\"$LoRaRegionValue\"," +
-                                    "\"$LoRaTXEnabled\"," +
-                                    "\"$LoRaTXPower\"," +
-                                    "\"$LoRaBandwith\"," +
-                                    "\"$LoRaCodingRate\"," +
-                                    "\"$LoRaFrequencyOffset\"," +
-                                    "\"$LoRaHopLimit\"," +
-                                    "\"$LoRaIgnoreMQTT\"," +
-                                    "\"$LoRaUsePreset\"," +
-                                    "\"$LoRaModemPresetName\"," +
-                                    "\"$LoRaModemPresetValue\"," +
-                                    "\"$LoRaIgnoreIncomingCount\"," +
-                                    "\"$LoRaIgnoreIncomingList\"," +
-                                    "\"$LoRaOverrideDutyCycle\"," +
-                                    "\"$LoRaOverrideFrequency\"," +
-                                    "\"$LoRaRadioFrequency\"," +
-                                    "\"$LoRaSpreadFactor\"," +
-                                    "\"$LoRaSX126XRxBosstedGain\"")
+                            
+                            writer.appendLine(
+                                    "$tDateTime," + "$tTimeMs," + "\"$tId\"," + "\"$tName\"," + "\"$tLat\"," + "\"$tLong\"," + "\"$tAlt\"," + "\"$tPDOP\"," + "\"$tGroudSpeed\"," + "\"$tGroundTrack\"," + "\"$tSatsInView\"," + "\"$tBatteryLevel\"," + "\"$tVoltage\"," + "\"$tChannelUtilization\"," + "\"$tAirUtilTx\"," +
+                                    "$rDateTime," + "$rTimeMs," +"\"$rId\"," + "\"$rName\"," + "\"$rLat\"," + "\"$rLong\"," + "\"$rAlt\"," + "\"$rRSSI\"," + "\"$rSNR\"," +
+                                    "\"$actual_airtime\"," + "\"$theoretical_airtime\"," + "\"$distance\"," + "\"$portnum\"," + "\"$decoded_payload\"," + "\"$payload\"," + "\"$messageSerializedSize\"," + "\"$messageViaMqtt\"," + "\"$messageWantAck\"," +
+                                    "\"$LoRaRegion\"," + "\"$LoRaRegionValue\"," + "\"$LoRaTXEnabled\"," + "\"$LoRaTXPower\"," + "\"$LoRaBandwith\"," + "\"$LoRaCodingRate\"," + "\"$LoRaFrequencyOffset\"," + "\"$LoRaHopLimit\"," + "\"$LoRaIgnoreMQTT\"," + "\"$LoRaUsePreset\"," + "\"$LoRaModemPresetName\"," + "\"$LoRaModemPresetValue\"," + "\"$LoRaIgnoreIncomingCount\"," + "\"$LoRaIgnoreIncomingList\"," + "\"$LoRaOverrideDutyCycle\"," + "\"$LoRaOverrideFrequency\"," + "\"$LoRaRadioFrequency\"," + "\"$LoRaSpreadFactor\"," + "\"$LoRaSX126XRxBosstedGain\"")
                         }
                     }
                 }
